@@ -1,0 +1,4 @@
+# Dependencies
+- tensorflow
+- opencv
+- numpy
