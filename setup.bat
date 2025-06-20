@@ -33,7 +33,7 @@ if %errorlevel% neq 0 (
 
 :: Install specific versions of dependencies
 echo Installing dependencies...
-"!PIP_PATH!" install google-generativeai==0.5.3 PyQt5
+"!PIP_PATH!" install tensorflow opencv-python numpy
 if %errorlevel% neq 0 (
     echo ❌ Failed to install dependencies.
     pause
