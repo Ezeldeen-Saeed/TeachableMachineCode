@@ -67,8 +67,8 @@ class CameraHandler:
             return None
 
         elif system == "Linux":
-            for i in range(10):
-                camera_path = f"/dev/video{i}"
+            for i in range(11):
+                camera_path = i
                 camera = cv2.VideoCapture(camera_path)
                 if camera.isOpened():
                     camera.release()
