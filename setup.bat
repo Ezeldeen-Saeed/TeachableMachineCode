@@ -23,10 +23,10 @@ set PYTHON_PATH=!FOUND!\Scripts\python.exe
 echo Using Python from: !PYTHON_PATH!
 
 :: Upgrade pip using Mu's Python
-echo ⬆️  Upgrading pip...
+echo Upgrading pip...
 "!PYTHON_PATH!" -m pip install --upgrade pip
 if %errorlevel% neq 0 (
-    echo ❌ Failed to upgrade pip.
+    echo Failed to upgrade pip.
     pause
     exit /b 1
 )
@@ -35,7 +35,7 @@ if %errorlevel% neq 0 (
 echo Installing dependencies...
 "!PIP_PATH!" install tensorflow opencv-python numpy
 if %errorlevel% neq 0 (
-    echo ❌ Failed to install dependencies.
+    echo Failed to install dependencies.
     pause
     exit /b 1
 )
