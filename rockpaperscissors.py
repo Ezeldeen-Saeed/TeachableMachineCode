@@ -7,45 +7,33 @@ labels_path = "./converted_savedmodel/converted_savedmodel/labels.txt"
 
 model = TeachableModel(model_path, labels_path)
 
-rps_choices = ["rock", "paper", "scissors"]
-
-def get_winner(player, computer):
-    if player == computer:
-        return "Draw!"
-    elif (player == "rock" and computer == "scissors") or \
-         (player == "paper" and computer == "rock") or \
-         (player == "scissors" and computer == "paper"):
-        return "You Win!"
-    else:
-        return "Computer Wins!"
+choices = ["rock", "paper", "scissors"]
 
 def play_game():
-    cap = cv2.VideoCapture(0)
-    print("Press 'q' to quit the game.")
+    computer_choice = random.choice(choices)
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    print("Get ready! Show your hand to the camera...")
+    for i in range(4, 0, -1):
+        print(i)
+        time.sleep(1)
 
-        image_tensor = model.preprocess_image(frame)
-        predictions = model.get_prediction(image_tensor)
-        player_move, confidence = model.get_classification(predictions)
+    prediction = model.predict()
+    player_choice = prediction.lower()
+    print(f"\nYou played: {player_choice}")
+    print(f"Computer played: {computer_choice}")
 
-        if player_move:
-            computer_move = random.choice(rps_choices)
-            result = get_winner(player_move, computer_move)
-            text = f"You: {player_move} | Computer: {computer_move} -> {result}"
-            cv2.putText(frame, text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8, (0, 255, 0), 2, cv2.LINE_AA)
+    if player_choice == computer_choice:
+        print("It's a tie!")
+    elif (player_choice == "rock" and computer_choice == "scissors") or \
+         (player_choice == "scissors" and computer_choice == "paper") or \
+         (player_choice == "paper" and computer_choice == "rock"):
+        print("You win! 🎉")
+    else:
+        print("Computer wins! 🤖")
 
-        cv2.imshow("Rock Paper Scissors", frame)
-
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
-
-if __name__ == "__main__":
+while True:
     play_game()
+    again = input("\nDo you want to play again? (y/n): ").strip().lower()
+    if again != "y":
+        print("Thanks for playing! Goodbye 👋")
+        break
