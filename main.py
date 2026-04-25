@@ -1,10 +1,26 @@
-import argparse
-from teachable import run_object_detection, TeachableModel
+import os
+# Suppress TensorFlow logging before importing it
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 
-confidence_threshold = 0.8
+from teachable import run_object_detection
 
-model_path = "./converted_savedmodel/converted_savedmodel/model.savedmodel/"
-labels_path = "./converted_savedmodel/converted_savedmodel/labels.txt"
+def main():
+    # --- SETTINGS ---
+    MODE = "samples"  # "camera" or "samples"
+    
+    # Paths are now relative to the project root based on your folder structure
+    MODEL = "./Model/model.savedmodel/"
+    LABELS = "./Model/labels.txt"
+    THRESHOLD = 0.8
+    # ----------------
 
+    # If samples_path is None, teachable.py will automatically open the GUI
+    run_object_detection(
+        mode=MODE,
+        model_path=MODEL,
+        labels_path=LABELS,
+        confidence_threshold=THRESHOLD
+    )
 
-run_object_detection(model_path, labels_path, confidence_threshold)
+if __name__ == "__main__":
+    main()

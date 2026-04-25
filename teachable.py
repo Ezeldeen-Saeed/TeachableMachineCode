@@ -1,16 +1,47 @@
 # teachable.py
+import os
+# Suppress TensorFlow logging
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+
 import tensorflow as tf
 import cv2
 import numpy as np
 import platform
+import tkinter as tk
+from tkinter import filedialog
+
+# Only show errors from TF logger
+tf.get_logger().setLevel('ERROR')
+
+def get_path_via_gui():
+    """Opens a GUI dialog to select a file or directory, centered on the screen."""
+    root = tk.Tk()
+    root.withdraw()
+    
+    # Calculate center position
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    x = screen_width // 2
+    y = screen_height // 2
+    
+    # Position the hidden root window at the center
+    root.geometry(f"+{x}+{y}")
+    root.attributes('-topmost', True)
+    
+    print("Please select a sample file...")
+    path = filedialog.askopenfilename(parent=root, title="Select Sample Image")
+    
+    root.destroy()
+    return path
 
 np.set_printoptions(suppress=True)
 
 class TeachableModel:
-    def __init__(self, model_path, labels_path, confidence_threshold=0.9):
+    def __init__(self, model_path, labels_path, confidence_threshold=0.9, input_size=(224, 224)):
         self.model = self._load_model(model_path)
         self.labels = self._load_labels(labels_path)
         self.confidence_threshold = confidence_threshold
+        self.input_size = input_size
 
     def _load_model(self, model_path):
         return tf.saved_model.load(model_path).signatures['serving_default']
@@ -20,13 +51,16 @@ class TeachableModel:
             return [label.strip() for label in f.readlines()]
 
     def preprocess_image(self, image):
-        image_resized = cv2.resize(image, (224, 224), interpolation=cv2.INTER_AREA)
-        image_normalized = np.asarray(image_resized, dtype=np.float32).reshape(1, 224, 224, 3) / 255.0
+        width, height = self.input_size
+        image_resized = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
+        image_normalized = np.asarray(image_resized, dtype=np.float32).reshape(1, width, height, 3) / 255.0
         return tf.convert_to_tensor(image_normalized)
 
     def get_prediction(self, image_tensor):
-        predictions = self.model(image_tensor)['sequential_3'].numpy()
-        return predictions
+        outputs = self.model(image_tensor)
+        # Dynamically get the first output key
+        output_key = list(outputs.keys())[0]
+        return outputs[output_key].numpy()
 
     def get_classification(self, predictions):
         class_idx = np.argmax(predictions)
@@ -99,24 +133,104 @@ class CameraHandler:
                 model.display_prediction(frame, f"{class_name}: {confidence:.2f}")
 
             # Show the frame with predictions
-            cv2.imshow("Real-Time Object Detection", frame)
-
-            # Quit when 'q' is pressed
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            try:
+                cv2.imshow("Real-Time Object Detection", frame)
+                # Quit when 'q' is pressed
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+            except cv2.error:
+                # In headless mode, we just print the result and break or continue
+                if class_name:
+                    print(f"Detected: {class_name} ({confidence:.2f})")
+                else:
+                    print("No detection")
+                # Since we can't see the video, we might want to break after one frame 
+                # or just continue if it's a real-time stream. 
+                # For this environment, let's break to avoid infinite loop of errors.
                 break
 
         # Release the video capture and close the window
         cap.release()
-        cv2.destroyAllWindows()
+        try:
+            cv2.destroyAllWindows()
+        except cv2.error:
+            pass
 
-def run_object_detection(model_path, labels_path, confidence_threshold):
-    print("Initializing model...")
+class SampleHandler:
+    @staticmethod
+    def test_from_directory(path, model):
+        valid_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.webp')
+        
+        if not os.path.exists(path):
+            print(f"Path not found: {path}")
+            return
+
+        if os.path.isfile(path):
+            files = [os.path.basename(path)]
+            directory_path = os.path.dirname(path) or "."
+        else:
+            files = os.listdir(path)
+            directory_path = path
+
+        print(f"Testing from: {path}")
+        for filename in files:
+            if filename.lower().endswith(valid_extensions):
+                image_path = os.path.join(directory_path, filename)
+                frame = cv2.imread(image_path)
+                if frame is None:
+                    continue
+
+                image_tensor = model.preprocess_image(frame)
+                predictions = model.get_prediction(image_tensor)
+                class_name, confidence = model.get_classification(predictions)
+
+                if class_name:
+                    print(f"File: {filename} -> {class_name} ({confidence:.2f})")
+                    model.display_prediction(frame, f"{class_name}: {confidence:.2f}")
+                else:
+                    print(f"File: {filename} -> No confident prediction")
+
+                try:
+                    cv2.imshow("Sample Test (Press any key for next)", frame)
+                    if cv2.waitKey(0) & 0xFF == ord('q'):
+                        break
+                except cv2.error:
+                    print("Could not display image (headless environment)")
+                    # In headless mode, we don't want to block forever, so we just continue
+                    pass
+        try:
+            cv2.destroyAllWindows()
+        except cv2.error:
+            pass
+
+def run_object_detection(
+    mode='camera', 
+    samples_path=None, 
+    model_path="./converted_savedmodel/converted_savedmodel/model.savedmodel/", 
+    labels_path="./converted_savedmodel/converted_savedmodel/labels.txt", 
+    confidence_threshold=0.8
+):
+    print(f"--- Running Mode: {mode.upper()} ---")
+    
+    # If in samples mode and no path provided, open the GUI
+    if mode == 'samples' and not samples_path:
+        samples_path = get_path_via_gui()
+        if not samples_path:
+            print("No file selected. Exiting...")
+            return
+
     model = TeachableModel(model_path, labels_path, confidence_threshold)
-    print("Model initialized successfully.")
 
-    camera_path = CameraHandler.get_camera_path()
-    if camera_path is None:
-        print("No camera found. Exiting...")
-        return
-
-    CameraHandler.capture_video(camera_path, model)
+    if mode == 'camera':
+        camera_path = CameraHandler.get_camera_path()
+        if camera_path is None:
+            print("No camera found. Exiting...")
+            return
+        CameraHandler.capture_video(camera_path, model)
+    elif mode == 'samples':
+        if not samples_path:
+            print("Error: mode 'samples' requires a 'samples_path'.")
+            return
+        SampleHandler.test_from_directory(samples_path, model)
+    else:
+        print(f"Invalid mode: {mode}. Choose 'camera' or 'samples'.")

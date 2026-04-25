@@ -1,25 +1,47 @@
 import random
 import cv2
-from teachable import TeachableModel
+import time
+from teachable import TeachableModel, CameraHandler
 
 model_path = "./converted_savedmodel/converted_savedmodel/model.savedmodel/"
 labels_path = "./converted_savedmodel/converted_savedmodel/labels.txt"
 
 model = TeachableModel(model_path, labels_path)
+camera_path = CameraHandler.get_camera_path()
 
 choices = ["rock", "paper", "scissors"]
 
 def play_game():
+    if camera_path is None:
+        print("No camera found!")
+        return
+
     computer_choice = random.choice(choices)
 
-    print("Get ready! Show your hand to the camera...")
-    for i in range(4, 0, -1):
+    print("\nGet ready! Show your hand to the camera...")
+    for i in range(3, 0, -1):
         print(i)
         time.sleep(1)
 
-    prediction = model.predict()
-    player_choice = prediction.lower()
-    print(f"\nYou played: {player_choice}")
+    cap = cv2.VideoCapture(camera_path)
+    ret, frame = cap.read()
+    cap.release()
+
+    if not ret:
+        print("Failed to capture image.")
+        return
+
+    # Process frame
+    image_tensor = model.preprocess_image(frame)
+    predictions = model.get_prediction(image_tensor)
+    player_choice, confidence = model.get_classification(predictions)
+
+    if not player_choice:
+        print("Could not detect your move clearly. Try again!")
+        return
+
+    player_choice = player_choice.lower()
+    print(f"\nYou played: {player_choice} ({confidence:.2f})")
     print(f"Computer played: {computer_choice}")
 
     if player_choice == computer_choice:

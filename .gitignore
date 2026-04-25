@@ -1,1 +1,5 @@
 __pycache__/
+.venv/
+happy-samples/
+angry-samples/
+shocked-samples/
