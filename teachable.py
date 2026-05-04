@@ -9,6 +9,8 @@ import numpy as np
 import platform
 import tkinter as tk
 from tkinter import filedialog
+import threading
+import time
 
 # Only show errors from TF logger
 tf.get_logger().setLevel('ERROR')
@@ -66,7 +68,12 @@ class TeachableModel:
         class_idx = np.argmax(predictions)
         confidence = predictions[0][class_idx]
         if confidence >= self.confidence_threshold:
-            return self.labels[class_idx], confidence
+            label = self.labels[class_idx].lower().strip()
+            # Remove leading numeric index if present (e.g., "0 happy" -> "happy")
+            parts = label.split(maxsplit=1)
+            if len(parts) > 1 and parts[0].isdigit():
+                label = parts[1]
+            return label, confidence
         return None, None
 
     @staticmethod
@@ -78,126 +85,67 @@ class TeachableModel:
         cv2.putText(image, class_name, position, font, font_scale, color, thickness, lineType=cv2.LINE_AA)
 
 class CameraHandler:
+    _active_stream = None
+
     @staticmethod
     def get_camera_path():
         system = platform.system()
-
-        if system == "Windows":
-            for i in range(10):
-                camera = cv2.VideoCapture(i)
-                if camera.isOpened():
-                    camera.release()
-                    return i
-                camera.release()
-            return None
-
-        elif system == "Darwin":
-            camera_path = 0
-            camera = cv2.VideoCapture(camera_path)
+        paths = range(10) if system in ["Windows", "Linux"] else [0]
+        for i in paths:
+            camera = cv2.VideoCapture(i)
             if camera.isOpened():
                 camera.release()
-                return camera_path
+                return i
             camera.release()
-            return None
-
-        elif system == "Linux":
-            for i in range(11):
-                camera_path = i
-                camera = cv2.VideoCapture(camera_path)
-                if camera.isOpened():
-                    camera.release()
-                    return camera_path
-                camera.release()
-            return None
-
-        else:
-            print("Unsupported operating system.")
-            return None
+        return None
 
     @staticmethod
-    def capture_video(camera_path, model):
-        cap = cv2.VideoCapture(camera_path)
-        detections = []
+    def start_preview():
+        if CameraHandler._active_stream is None:
+            path = CameraHandler.get_camera_path()
+            if path is None:
+                print("No camera found!")
+                return None
+            CameraHandler._active_stream = CameraStream(path)
+            CameraHandler._active_stream.start()
+            # Wait for first frame
+            timeout = 50
+            while CameraHandler._active_stream.frame is None and timeout > 0:
+                time.sleep(0.1)
+                timeout -= 1
+        return CameraHandler._active_stream
 
-        while cap.isOpened():
-            ret, frame = cap.read()
+    @staticmethod
+    def get_latest_frame():
+        if CameraHandler._active_stream and CameraHandler._active_stream.running:
+            return CameraHandler._active_stream.frame
+        return None
+
+class CameraStream(threading.Thread):
+    def __init__(self, camera_path):
+        super().__init__(daemon=True)
+        self.cap = cv2.VideoCapture(camera_path)
+        self.frame = None
+        self.running = True
+
+    def run(self):
+        print("Camera Preview started. Press 'q' in the window to stop.")
+        while self.running:
+            ret, frame = self.cap.read()
             if not ret:
                 break
-
-            # Preprocess the frame and get predictions
-            image_tensor = model.preprocess_image(frame)
-            predictions = model.get_prediction(image_tensor)
-
-            # Find the class with the highest confidence
-            class_name, confidence = model.get_classification(predictions)
-            if class_name:
-                model.display_prediction(frame, f"{class_name}: {confidence:.2f}")
-                detections.append({"label": class_name, "confidence": confidence})
-
-            # Show the frame with predictions
-            try:
-                cv2.imshow("Real-Time Object Detection", frame)
-                # Quit when 'q' is pressed
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-            except cv2.error:
-                # In headless mode, we just break to avoid infinite loop of errors.
-                break
-
-        # Release the video capture and close the window
-        cap.release()
-        try:
-            cv2.destroyAllWindows()
-        except cv2.error:
-            pass
+            self.frame = frame
+            cv2.imshow("Camera Preview", frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                self.running = False
         
-        return detections
+        self.cap.release()
+        cv2.destroyAllWindows()
+        self.running = False
 
-class SampleHandler:
-    @staticmethod
-    def test_from_directory(path, model):
-        valid_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.webp')
-        results = []
-        
-        if not os.path.exists(path):
-            return results
-
-        if os.path.isfile(path):
-            files = [os.path.basename(path)]
-            directory_path = os.path.dirname(path) or "."
-        else:
-            files = os.listdir(path)
-            directory_path = path
-
-        for filename in files:
-            if filename.lower().endswith(valid_extensions):
-                image_path = os.path.join(directory_path, filename)
-                frame = cv2.imread(image_path)
-                if frame is None:
-                    continue
-
-                image_tensor = model.preprocess_image(frame)
-                predictions = model.get_prediction(image_tensor)
-                class_name, confidence = model.get_classification(predictions)
-
-                if class_name:
-                    results.append({"file": filename, "label": class_name, "confidence": float(confidence)})
-                    model.display_prediction(frame, f"{class_name}: {confidence:.2f}")
-                else:
-                    results.append({"file": filename, "label": None, "confidence": 0.0})
-
-                try:
-                    cv2.imshow("Sample Test (Press any key for next)", frame)
-                    if cv2.waitKey(0) & 0xFF == ord('q'):
-                        break
-                except cv2.error:
-                    pass
-        try:
-            cv2.destroyAllWindows()
-        except cv2.error:
-            pass
-        
-        return results
+def preview_camera():
+    """Starts a non-blocking camera preview in a background thread."""
+    return CameraHandler.start_preview()
 
 def run_object_detection(
     mode='camera', 
@@ -206,22 +154,53 @@ def run_object_detection(
     labels_path="./converted_savedmodel/converted_savedmodel/labels.txt", 
     confidence_threshold=0.8
 ):
-    # If in samples mode and no path provided, open the GUI
-    if mode == 'samples' and not samples_path:
-        samples_path = get_path_via_gui()
-        if not samples_path:
-            return None
-
     model = TeachableModel(model_path, labels_path, confidence_threshold)
 
     if mode == 'camera':
-        camera_path = CameraHandler.get_camera_path()
-        if camera_path is None:
-            return None
-        return CameraHandler.capture_video(camera_path, model)
+        # Check if preview is already running
+        frame = CameraHandler.get_latest_frame()
+        
+        if frame is None:
+            # Fallback to one-shot capture if preview isn't running
+            camera_path = CameraHandler.get_camera_path()
+            if camera_path is None: return None
+            cap = cv2.VideoCapture(camera_path)
+            ret, frame = cap.read()
+            cap.release()
+            if not ret: return None
+            
+        image_tensor = model.preprocess_image(frame)
+        predictions = model.get_prediction(image_tensor)
+        class_name, confidence = model.get_classification(predictions)
+        
+        return [{"label": class_name, "confidence": float(confidence) if confidence else 0.0}]
+
     elif mode == 'samples':
         if not samples_path:
-            return None
-        return SampleHandler.test_from_directory(samples_path, model)
-    else:
-        return None
+            samples_path = get_path_via_gui()
+            if not samples_path: return None
+        
+        # We'll use SampleHandler logic but simplified for brevity here
+        valid_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.webp')
+        results = []
+        if os.path.isfile(samples_path):
+            files = [samples_path]
+        else:
+            files = [os.path.join(samples_path, f) for f in os.listdir(samples_path) if f.lower().endswith(valid_extensions)]
+            
+        for img_path in files:
+            frame = cv2.imread(img_path)
+            if frame is None: continue
+            image_tensor = model.preprocess_image(frame)
+            predictions = model.get_prediction(image_tensor)
+            class_name, confidence = model.get_classification(predictions)
+            results.append({"file": os.path.basename(img_path), "label": class_name, "confidence": float(confidence) if confidence else 0.0})
+        return results
+    
+    return None
+
+class SampleHandler:
+    # Kept for compatibility if needed elsewhere, but logic moved to run_object_detection
+    @staticmethod
+    def test_from_directory(path, model):
+        return run_object_detection(mode='samples', samples_path=path, model_path=model.model_path, labels_path=model.labels_path)
