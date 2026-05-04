@@ -117,6 +117,7 @@ class CameraHandler:
     @staticmethod
     def capture_video(camera_path, model):
         cap = cv2.VideoCapture(camera_path)
+        detections = []
 
         while cap.isOpened():
             ret, frame = cap.read()
@@ -131,6 +132,7 @@ class CameraHandler:
             class_name, confidence = model.get_classification(predictions)
             if class_name:
                 model.display_prediction(frame, f"{class_name}: {confidence:.2f}")
+                detections.append({"label": class_name, "confidence": confidence})
 
             # Show the frame with predictions
             try:
@@ -139,14 +141,7 @@ class CameraHandler:
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
             except cv2.error:
-                # In headless mode, we just print the result and break or continue
-                if class_name:
-                    print(f"Detected: {class_name} ({confidence:.2f})")
-                else:
-                    print("No detection")
-                # Since we can't see the video, we might want to break after one frame 
-                # or just continue if it's a real-time stream. 
-                # For this environment, let's break to avoid infinite loop of errors.
+                # In headless mode, we just break to avoid infinite loop of errors.
                 break
 
         # Release the video capture and close the window
@@ -155,15 +150,17 @@ class CameraHandler:
             cv2.destroyAllWindows()
         except cv2.error:
             pass
+        
+        return detections
 
 class SampleHandler:
     @staticmethod
     def test_from_directory(path, model):
         valid_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.webp')
+        results = []
         
         if not os.path.exists(path):
-            print(f"Path not found: {path}")
-            return
+            return results
 
         if os.path.isfile(path):
             files = [os.path.basename(path)]
@@ -172,7 +169,6 @@ class SampleHandler:
             files = os.listdir(path)
             directory_path = path
 
-        print(f"Testing from: {path}")
         for filename in files:
             if filename.lower().endswith(valid_extensions):
                 image_path = os.path.join(directory_path, filename)
@@ -185,23 +181,23 @@ class SampleHandler:
                 class_name, confidence = model.get_classification(predictions)
 
                 if class_name:
-                    print(f"File: {filename} -> {class_name} ({confidence:.2f})")
+                    results.append({"file": filename, "label": class_name, "confidence": float(confidence)})
                     model.display_prediction(frame, f"{class_name}: {confidence:.2f}")
                 else:
-                    print(f"File: {filename} -> No confident prediction")
+                    results.append({"file": filename, "label": None, "confidence": 0.0})
 
                 try:
                     cv2.imshow("Sample Test (Press any key for next)", frame)
                     if cv2.waitKey(0) & 0xFF == ord('q'):
                         break
                 except cv2.error:
-                    print("Could not display image (headless environment)")
-                    # In headless mode, we don't want to block forever, so we just continue
                     pass
         try:
             cv2.destroyAllWindows()
         except cv2.error:
             pass
+        
+        return results
 
 def run_object_detection(
     mode='camera', 
@@ -210,27 +206,22 @@ def run_object_detection(
     labels_path="./converted_savedmodel/converted_savedmodel/labels.txt", 
     confidence_threshold=0.8
 ):
-    print(f"--- Running Mode: {mode.upper()} ---")
-    
     # If in samples mode and no path provided, open the GUI
     if mode == 'samples' and not samples_path:
         samples_path = get_path_via_gui()
         if not samples_path:
-            print("No file selected. Exiting...")
-            return
+            return None
 
     model = TeachableModel(model_path, labels_path, confidence_threshold)
 
     if mode == 'camera':
         camera_path = CameraHandler.get_camera_path()
         if camera_path is None:
-            print("No camera found. Exiting...")
-            return
-        CameraHandler.capture_video(camera_path, model)
+            return None
+        return CameraHandler.capture_video(camera_path, model)
     elif mode == 'samples':
         if not samples_path:
-            print("Error: mode 'samples' requires a 'samples_path'.")
-            return
-        SampleHandler.test_from_directory(samples_path, model)
+            return None
+        return SampleHandler.test_from_directory(samples_path, model)
     else:
-        print(f"Invalid mode: {mode}. Choose 'camera' or 'samples'.")
+        return None

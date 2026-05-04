@@ -15,12 +15,19 @@ def main():
     # ----------------
 
     # If samples_path is None, teachable.py will automatically open the GUI
-    run_object_detection(
+    results = run_object_detection(
         mode=MODE,
         model_path=MODEL,
         labels_path=LABELS,
         confidence_threshold=THRESHOLD
     )
+    
+    if results:
+        print("\n--- Detection Results ---")
+        for result in results:
+            print(result)
+    else:
+        print("\nNo results or detection cancelled.")
 
 if __name__ == "__main__":
     main()
